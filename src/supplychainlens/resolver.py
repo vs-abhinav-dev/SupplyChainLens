@@ -33,6 +33,8 @@ class DependencyResolver:
 
     def __init__(self, fetcher: Optional[NPMFetcher] = None):
         self.fetcher = fetcher or NPMFetcher()
+        self._parsed_versions_cache: Dict[str, List[PackageVersion]] = {}
+        self._resolution_cache: Dict[Tuple[str, str, Optional[str]], ResolvedDependency] = {}
 
     def resolve_dependency(
         self,
@@ -44,26 +46,44 @@ class DependencyResolver:
     ) -> ResolvedDependency:
         """
         Resolves a single dependency requirement taking publication date restrictions into account.
+        Uses in-memory memoization cache for identical resolution queries.
         """
+        source_date_str = str(source_date) if source_date is not None else None
+        cache_key = (target_package, version_constraint, source_date_str)
+
+        if cache_key in self._resolution_cache:
+            cached_res = self._resolution_cache[cache_key]
+            return ResolvedDependency(
+                source_node_id=source_node_id,
+                target_package=cached_res.target_package,
+                version_constraint=cached_res.version_constraint,
+                resolved_node_id=cached_res.resolved_node_id,
+                resolution_status=cached_res.resolution_status,
+            )
+
         # Step 1: Non-registry check
         if is_non_registry_constraint(version_constraint):
-            return ResolvedDependency(
+            res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
                 version_constraint=version_constraint,
                 resolved_node_id=None,
                 resolution_status=ResolutionStatus.NON_REGISTRY,
             )
+            self._resolution_cache[cache_key] = res
+            return res
 
         # Step 2: Invalid constraint check
         if not is_valid_constraint(version_constraint):
-            return ResolvedDependency(
+            res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
                 version_constraint=version_constraint,
                 resolved_node_id=None,
                 resolution_status=ResolutionStatus.INVALID_CONSTRAINT,
             )
+            self._resolution_cache[cache_key] = res
+            return res
 
         # Step 3: Fetch target packument
         if cached_packument is not None:
@@ -72,16 +92,22 @@ class DependencyResolver:
             raw_packument = self.fetcher.fetch_packument(target_package)
 
         if raw_packument is None:
-            return ResolvedDependency(
+            res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
                 version_constraint=version_constraint,
                 resolved_node_id=None,
                 resolution_status=ResolutionStatus.PACKAGE_MISSING,
             )
+            self._resolution_cache[cache_key] = res
+            return res
 
-        # Step 4: Parse packument
-        _, versions, _ = NPMParser.parse_packument(raw_packument)
+        # Step 4: Parse packument (use cache if available)
+        if target_package in self._parsed_versions_cache:
+            versions = self._parsed_versions_cache[target_package]
+        else:
+            _, versions, _ = NPMParser.parse_packument(raw_packument)
+            self._parsed_versions_cache[target_package] = versions
 
         # Step 5: Filter out versions published AFTER source_date
         parsed_source_date = _parse_iso_date(source_date)
@@ -104,21 +130,26 @@ class DependencyResolver:
 
         # Step 7: Sort descending and select latest
         if not satisfying_versions:
-            return ResolvedDependency(
+            res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
                 version_constraint=version_constraint,
                 resolved_node_id=None,
                 resolution_status=ResolutionStatus.NO_SATISFYING_VERSION,
             )
+            self._resolution_cache[cache_key] = res
+            return res
 
         satisfying_versions.sort(key=lambda item: item[0], reverse=True)
         best_version = satisfying_versions[0][1]
 
-        return ResolvedDependency(
+        res = ResolvedDependency(
             source_node_id=source_node_id,
             target_package=target_package,
             version_constraint=version_constraint,
             resolved_node_id=f"npm:{target_package}@{best_version.version}",
             resolution_status=ResolutionStatus.RESOLVED,
         )
+        self._resolution_cache[cache_key] = res
+        return res
+

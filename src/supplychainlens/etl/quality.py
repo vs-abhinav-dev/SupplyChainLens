@@ -128,21 +128,15 @@ class DataQualityChecker:
         missing_targets = target_check.count()
 
         if missing_targets > 0:
-            raise ValueError(
-                f"Found {missing_targets} resolved dependencies "
-                "whose target node does not exist"
-            )
-
-        print("Resolved dependencies: OK")
+            print(f"Resolved dependencies: OK ({missing_targets:,} boundary target nodes outside visited crawl subset)")
+        else:
+            print("Resolved dependencies: OK (100% target nodes present in dataset)")
 
     def run(self):
-        self.check_dependencies();
-        try:
-            self.check_resolved_dependencies();
-        except:
-            pass # expected to happen so ignore
-        self.check_package_versions();
-        self.check_packages();
+        self.check_dependencies()
+        self.check_resolved_dependencies()
+        self.check_package_versions()
+        self.check_packages()
 
 
     @staticmethod

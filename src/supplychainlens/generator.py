@@ -1,5 +1,6 @@
 import json
 import random
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -27,6 +28,7 @@ class NPMDatasetGenerator:
         seed: int = 42,
         output_dir: str | Path = "data/staging/npm",
         source_date: Optional[str] = None,
+        show_progress: bool = True,
     ) -> Dict[str, Any]:
         """
         Recursively traverses package dependencies starting from seed packages until target_nodes packages are visited.
@@ -53,22 +55,38 @@ class NPMDatasetGenerator:
         resolved_dependencies_list: List[ResolvedDependency] = []
         resolution_counts: Dict[ResolutionStatus, int] = {status: 0 for status in ResolutionStatus}
 
+        t0 = time.perf_counter()
+
         while queue and len(visited_packages) < target_nodes:
             current_pkg = queue.popleft()
             if current_pkg in visited_packages:
                 continue
 
             visited_packages.add(current_pkg)
-            raw_packument = self.fetcher.fetch_packument(current_pkg)
+            if hasattr(self.fetcher, "fetch_packument_with_status"):
+                raw_packument, fetch_status = self.fetcher.fetch_packument_with_status(current_pkg)
+            else:
+                raw_packument = self.fetcher.fetch_packument(current_pkg)
+                fetch_status = "disk_cache"
+
             if raw_packument is None:
-                ## ayo why is None, handle ?
+                if show_progress:
+                    print(f"[{len(visited_packages)}/{target_nodes}] [NOT_FOUND] Package '{current_pkg}' not found on npm registry")
                 continue
+
+            if show_progress:
+                status_tag = "NETWORK" if fetch_status == "network" else ("DISK_CACHE" if fetch_status == "disk_cache" else "MEM_CACHE")
+                status_text = "Downloaded from registry" if fetch_status == "network" else ("Loaded from disk cache" if fetch_status == "disk_cache" else "Loaded from memory cache")
+                print(f"[{len(visited_packages)}/{target_nodes}] [{status_tag}] [{status_text}] {current_pkg}")
 
             pkg_obj, versions, deps = NPMParser.parse_packument(raw_packument)
             packages_map[pkg_obj.package_id] = pkg_obj
 
             for ver in versions:
                 package_versions_map[ver.node_id] = ver
+
+            if show_progress:
+                print(f"       ↳ Versions found: {len(versions):,} | Resolving {len(deps):,} dependencies...")
 
             new_target_candidates: Set[str] = set()
 
@@ -80,7 +98,7 @@ class NPMDatasetGenerator:
                     target_package=dep.target_package,
                     version_constraint=dep.version_constraint,
                     source_date=source_date,
-                    cached_packument=None,
+                    cached_packument=self.fetcher.fetch_packument(dep.target_package),
                 )
 
                 resolved_dependencies_list.append(resolved)
@@ -105,6 +123,8 @@ class NPMDatasetGenerator:
                     queued_packages.add(cand)
                     queue.append(cand)
 
+        crawl_time = time.perf_counter() - t0
+
         # Write JSONL outputs
         self._write_jsonl(output_path / "packages.jsonl", [p.model_dump() for p in packages_map.values()])
         self._write_jsonl(
@@ -126,6 +146,7 @@ class NPMDatasetGenerator:
             "dependency_records": len(dependencies_list),
             "resolved_edges": resolved_count,
             "unresolved_edges": unresolved_count,
+            "crawl_time_seconds": round(crawl_time, 3),
             "resolution_breakdown": {status.value: count for status, count in resolution_counts.items()},
         }
 
