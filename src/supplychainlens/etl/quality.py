@@ -128,7 +128,11 @@ class DataQualityChecker:
         missing_targets = target_check.count()
 
         if missing_targets > 0:
-            print(f"Resolved dependencies: OK ({missing_targets:,} boundary target nodes outside visited crawl subset)")
+            print(
+                f"Resolved dependencies: OK"
+                f" ({missing_targets:,} boundary target"
+                f" nodes outside visited crawl subset)"
+            )
         else:
             print("Resolved dependencies: OK (100% target nodes present in dataset)")
 

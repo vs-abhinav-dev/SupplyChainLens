@@ -27,7 +27,8 @@ def render_ascii_subgraph(
     max_depth : int, default=2
         Maximum tree depth traversal.
     direction : str, default="outgoing"
-        'outgoing' to show dependencies (A depends on B), or 'incoming' to show dependents (B depends on A).
+        'outgoing' to show dependencies (A depends on B),
+        or 'incoming' to show dependents (B depends on A).
 
     Returns
     -------
@@ -57,8 +58,15 @@ def render_ascii_subgraph(
             connector = " └── " if is_last else " ├── "
             child_prefix = "     " if is_last else " │   "
 
-            edge = graph.get_edge(node_id, target_id) if direction == "outgoing" else graph.get_edge(target_id, node_id)
-            constraint_str = f" [{edge.version_constraint}]" if edge and edge.version_constraint else ""
+            if direction == "outgoing":
+                edge = graph.get_edge(node_id, target_id)
+            else:
+                edge = graph.get_edge(target_id, node_id)
+
+            if edge and edge.version_constraint:
+                constraint_str = f" [{edge.version_constraint}]"
+            else:
+                constraint_str = ""
 
             label = _clean_node_label(target_id)
             lines.append(f"{prefix}{connector}{label}{constraint_str}")

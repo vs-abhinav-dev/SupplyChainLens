@@ -7,7 +7,8 @@ class VersionGraph:
     Directed graph abstraction for npm package version dependencies.
 
     Vertices represent npm package versions (Node).
-    Edges represent resolved dependencies (Edge), directed from source to target (A -> B means A depends on B).
+    Edges represent resolved dependencies (Edge), directed from
+    source to target (A -> B means A depends on B).
 
     Edges are only included if both source and target vertices are present in the graph.
     Boundary edges (where target vertex lies outside the dataset) are tracked separately.
@@ -52,7 +53,11 @@ class VersionGraph:
             self.record_boundary_edge(
                 source_node_id=edge.source_node_id,
                 target_node_id=edge.target_node_id,
-                target_package=edge.target_node_id.split("@")[0].replace("npm:", "") if "@" in edge.target_node_id else edge.target_node_id,
+                target_package=(
+                    edge.target_node_id.split("@")[0].replace("npm:", "")
+                    if "@" in edge.target_node_id
+                    else edge.target_node_id
+                ),
                 version_constraint=edge.version_constraint,
                 reason=",".join(reason),
             )
@@ -225,20 +230,31 @@ class VersionGraph:
             if tgt not in self._nodes:
                 errors.append(f"Edge ({src} -> {tgt}) has non-existent target node '{tgt}'")
             if edge.source_node_id != src or edge.target_node_id != tgt:
-                errors.append(f"Edge metadata key mismatch: key=({src}, {tgt}), edge=({edge.source_node_id}, {edge.target_node_id})")
+                errors.append(
+                    f"Edge metadata key mismatch: "
+                    f"key=({src}, {tgt}), "
+                    f"edge=({edge.source_node_id}, "
+                    f"{edge.target_node_id})"
+                )
 
         for src, targets in self._outgoing.items():
             if src not in self._nodes:
                 errors.append(f"Outgoing adjacency index contains unknown source node '{src}'")
             for tgt in targets:
                 if tgt not in self._nodes:
-                    errors.append(f"Outgoing adjacency index from '{src}' points to unknown target node '{tgt}'")
+                    errors.append(
+                        f"Outgoing adjacency index from '{src}'"
+                        f" points to unknown target node '{tgt}'"
+                    )
 
         for tgt, sources in self._incoming.items():
             if tgt not in self._nodes:
                 errors.append(f"Incoming adjacency index contains unknown target node '{tgt}'")
             for src in sources:
                 if src not in self._nodes:
-                    errors.append(f"Incoming adjacency index to '{tgt}' points from unknown source node '{src}'")
+                    errors.append(
+                        f"Incoming adjacency index to '{tgt}'"
+                        f" points from unknown source node '{src}'"
+                    )
 
         return errors

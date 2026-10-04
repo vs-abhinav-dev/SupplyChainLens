@@ -4,7 +4,9 @@ import semver
 
 
 def is_non_registry_constraint(constraint: str) -> bool:
-    """Detects if a dependency constraint is a non-registry dependency (git, HTTP, file path, workspace)."""
+    """Detects if a dependency constraint is a non-registry
+    dependency (git, HTTP, file path, workspace).
+    """
     c = constraint.strip().lower()
     if not c:
         return False

@@ -1,18 +1,20 @@
+import semver
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from .fetcher import NPMFetcher
-from .models import Dependency, PackageVersion, ResolutionStatus, ResolvedDependency
+from .models import PackageVersion, ResolutionStatus, ResolvedDependency
 from .parser import NPMParser
 from .semver_utils import (
     is_non_registry_constraint,
-    is_valid_constraint,
     normalize_version,
-    satisfies,
+    parse_range_expression,
 )
 
 
 def _parse_iso_date(date_input: str | datetime | None) -> Optional[datetime]:
-    """Helper to convert date strings or datetimes into timezone-aware/naive comparable datetimes."""
+    """Helper to convert date strings or datetimes into
+    timezone-aware/naive comparable datetimes.
+    """
     if date_input is None:
         return None
     if isinstance(date_input, datetime):
@@ -33,7 +35,9 @@ class DependencyResolver:
 
     def __init__(self, fetcher: Optional[NPMFetcher] = None):
         self.fetcher = fetcher or NPMFetcher()
-        self._parsed_versions_cache: Dict[str, List[PackageVersion]] = {}
+        self._parsed_versions_cache: Dict[
+            str, List[Tuple[semver.Version, Optional[datetime], PackageVersion]]
+        ] = {}
         self._resolution_cache: Dict[Tuple[str, str, Optional[str]], ResolvedDependency] = {}
 
     def resolve_dependency(
@@ -73,8 +77,10 @@ class DependencyResolver:
             self._resolution_cache[cache_key] = res
             return res
 
-        # Step 2: Invalid constraint check
-        if not is_valid_constraint(version_constraint):
+        # Step 2: Validate and compile constraint matcher (O(1) compile once)
+        try:
+            matcher = parse_range_expression(version_constraint)
+        except ValueError:
             res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
@@ -85,51 +91,52 @@ class DependencyResolver:
             self._resolution_cache[cache_key] = res
             return res
 
-        # Step 3: Fetch target packument
-        if cached_packument is not None:
-            raw_packument = cached_packument
-        else:
-            raw_packument = self.fetcher.fetch_packument(target_package)
-
-        if raw_packument is None:
-            res = ResolvedDependency(
-                source_node_id=source_node_id,
-                target_package=target_package,
-                version_constraint=version_constraint,
-                resolved_node_id=None,
-                resolution_status=ResolutionStatus.PACKAGE_MISSING,
-            )
-            self._resolution_cache[cache_key] = res
-            return res
-
-        # Step 4: Parse packument (use cache if available)
+        # Step 3: Fetch target packument (or use cache if package versions already parsed)
         if target_package in self._parsed_versions_cache:
-            versions = self._parsed_versions_cache[target_package]
+            sorted_versions = self._parsed_versions_cache[target_package]
         else:
+            if cached_packument is not None:
+                raw_packument = cached_packument
+            else:
+                raw_packument = self.fetcher.fetch_packument(target_package)
+
+            if raw_packument is None:
+                res = ResolvedDependency(
+                    source_node_id=source_node_id,
+                    target_package=target_package,
+                    version_constraint=version_constraint,
+                    resolved_node_id=None,
+                    resolution_status=ResolutionStatus.PACKAGE_MISSING,
+                )
+                self._resolution_cache[cache_key] = res
+                return res
+
+            # Parse and pre-sort versions descending by SemVer once
             _, versions, _ = NPMParser.parse_packument(raw_packument)
-            self._parsed_versions_cache[target_package] = versions
-
-        # Step 5: Filter out versions published AFTER source_date
-        parsed_source_date = _parse_iso_date(source_date)
-        eligible_versions: List[PackageVersion] = []
-
-        for ver in versions:
-            if parsed_source_date is not None and ver.published_at is not None:
-                ver_pub_date = _parse_iso_date(ver.published_at)
-                if ver_pub_date is not None and ver_pub_date > parsed_source_date:
-                    continue  # Published after source date cut-off
-            eligible_versions.append(ver)
-
-        # Step 6: Filter by semver constraint
-        satisfying_versions: List[Tuple[Any, PackageVersion]] = []
-        for ver in eligible_versions:
-            if satisfies(ver.version, version_constraint):
+            parsed_list: List[Tuple[semver.Version, Optional[datetime], PackageVersion]] = []
+            for ver in versions:
                 norm_v = normalize_version(ver.version)
                 if norm_v is not None:
-                    satisfying_versions.append((norm_v, ver))
+                    pub_dt = _parse_iso_date(ver.published_at) if ver.published_at else None
+                    parsed_list.append((norm_v, pub_dt, ver))
 
-        # Step 7: Sort descending and select latest
-        if not satisfying_versions:
+            parsed_list.sort(key=lambda item: item[0], reverse=True)
+            sorted_versions = parsed_list
+            self._parsed_versions_cache[target_package] = sorted_versions
+
+        # Step 4: Find highest matching version (early exit on first satisfying match)
+        parsed_source_date = _parse_iso_date(source_date)
+        best_version: Optional[PackageVersion] = None
+
+        for norm_v, pub_dt, ver in sorted_versions:
+            if parsed_source_date is not None and pub_dt is not None:
+                if pub_dt > parsed_source_date:
+                    continue  # Published after source date cut-off
+            if matcher(norm_v):
+                best_version = ver
+                break
+
+        if best_version is None:
             res = ResolvedDependency(
                 source_node_id=source_node_id,
                 target_package=target_package,
@@ -139,9 +146,6 @@ class DependencyResolver:
             )
             self._resolution_cache[cache_key] = res
             return res
-
-        satisfying_versions.sort(key=lambda item: item[0], reverse=True)
-        best_version = satisfying_versions[0][1]
 
         res = ResolvedDependency(
             source_node_id=source_node_id,

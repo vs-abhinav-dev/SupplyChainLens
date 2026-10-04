@@ -13,7 +13,8 @@ class LockfileValidator:
 
     def load_lockfile_actual_versions(self, lockfile_path: Path | str) -> Dict[str, str]:
         """
-        Parses package-lock.json (supporting v1, v2, v3 formats) to map direct package names to installed versions.
+        Parses package-lock.json (supporting v1, v2, v3 formats)
+        to map direct package names to installed versions.
         """
         with open(lockfile_path, "r", encoding="utf-8") as f:
             lock_data = json.load(f)
@@ -29,7 +30,8 @@ class LockfileValidator:
                     # pkg_path is usually "node_modules/lodash" or "node_modules/@types/node"
                     if pkg_path.startswith("node_modules/"):
                         pkg_name = pkg_path[len("node_modules/") :]
-                        # Top-level direct node_modules entry only (no nested node_modules/foo/node_modules/bar)
+                        # Top-level direct node_modules entry only
+                        # (no nested node_modules/foo/node_modules/bar)
                         if "node_modules/" not in pkg_name:
                             actual_versions[pkg_name] = details["version"]
 

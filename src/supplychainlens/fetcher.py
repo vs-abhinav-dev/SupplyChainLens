@@ -21,7 +21,9 @@ class NPMFetcher:
         return self._client
 
     def _get_filename(self, package_name: str) -> Path:
-        """Sanitize package name into safe filename, e.g. '@types/lodash' -> '@types_lodash.json'."""
+        """Sanitize package name into safe filename,
+        e.g. '@types/lodash' -> '@types_lodash.json'.
+        """
         safe_name = package_name.replace("/", "_")
         return self.raw_data_dir / f"{safe_name}.json"
 
@@ -78,7 +80,9 @@ class NPMFetcher:
                     return data, "disk_cache"
             raise e
 
-    def fetch_packument(self, package_name: str, force_fetch: bool = False) -> Optional[Dict[str, Any]]:
+    def fetch_packument(
+        self, package_name: str, force_fetch: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Fetches packument for a package.
         Checks in-memory cache first, then local disk cache unless force_fetch is True.

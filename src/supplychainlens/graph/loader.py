@@ -66,7 +66,8 @@ class GraphLoader:
             F.col("resolution_status") == "resolved"
         )
 
-        # Join resolved_dependencies with dependencies on source_node_id, target_package, version_constraint
+        # Join resolved_dependencies with dependencies on
+        # source_node_id, target_package, version_constraint
         # to obtain dependency_type
         joined_df = res_deps_df.join(
             deps_df,
